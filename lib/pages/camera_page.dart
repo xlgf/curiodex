@@ -1,208 +1,185 @@
-import 'package:camera/camera.dart';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show WriteBuffer;
-import 'package:google_mlkit_object_detection/google_mlkit_object_detection.dart';
+import 'package:camera/camera.dart';
+import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class CameraPage extends StatefulWidget {
-  const CameraPage({super.key});
+  final List<CameraDescription> cameras;
+  const CameraPage({super.key , required this.cameras});
 
   @override
   State<CameraPage> createState() => _CameraPageState();
 }
 
 class _CameraPageState extends State<CameraPage> {
-  CameraController? _controller;
-  late List<CameraDescription> _cameras;
-  bool _isDetecting = false;
-  String? _detectedLabel;
-  final ObjectDetector _objectDetector = ObjectDetector(
-    options: ObjectDetectorOptions(
-      mode: DetectionMode.stream,
-      classifyObjects: true,
-      multipleObjects: true,
-    ),
-  );
+  //camera implementation
+  late CameraController _cameraController;
+  bool isCameraReady = false;
+  String result = 'Detecting...';
+  late ImageLabeler _imageLabeler;
+  bool isDetecting = false;
+
+
+  Future<void> _initializeCameraController() async {
+   _cameraController = CameraController(widget.cameras[0],
+    ResolutionPreset.ultraHigh,
+    enableAudio: false
+    );
+    await _cameraController.initialize();
+    if(!mounted) return;
+    setState(() {
+      isCameraReady = true;
+    });
+
+    _startImageStream();
+
+  }
+
+  void initializeMLKit() {
+    final options = ImageLabelerOptions(confidenceThreshold: 0.5);
+    _imageLabeler = ImageLabeler(options: options);
+  }
+
+  void _startImageStream() {
+    _cameraController.startImageStream((CameraImage image) async {
+      if(isDetecting) return;
+      isDetecting = true;
+      await _processImage(image);
+      isDetecting = false;
+    });
+
+    
+  }
+  Future<void> _processImage(CameraImage image) async {
+
+      try{
+        final Directory tempDir = await getTemporaryDirectory();
+        final String imagePath = '${tempDir.path}/${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final File imageFile = File(imagePath);
+
+        final XFile xFile = await _cameraController.takePicture();
+        await xFile.saveTo(imagePath);
+
+        final inputImage = InputImage.fromFilePath(imagePath);
+        final List<ImageLabel> labels = await _imageLabeler.processImage(inputImage);
+
+        String detectedObjects = labels.isNotEmpty ? labels.map((label) => "${label.label} (${(label.confidence * 100).toStringAsFixed(2)}%)").join(', ') : 'No objects detected';
+        setState(() {
+          result = detectedObjects;
+          
+        });
+      } catch (error) {
+          // ignore: use_build_context_synchronously
+          ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error processing image'), backgroundColor: Colors.red[100]),
+        );
+      }
+    }
 
   @override
-  void initState() {
-    super.initState();
-    _initCamera();
+  void dispose() {
+    _cameraController.dispose();
+    _imageLabeler.close();
+    super.dispose();
   }
 
-  Future<void> _initCamera() async {
-    _cameras = await availableCameras();
-    _controller = CameraController(
-      _cameras.first,
-      ResolutionPreset.medium,
-      enableAudio: false,
-    );
-    await _controller!.initialize();
-    if (!mounted) return; // Prevents setState if widget is disposed
-    setState(() {});
-    _controller!.startImageStream(_processCameraImage);
-  }
-
-  Future<void> _processCameraImage(CameraImage image) async {
-    if (_isDetecting) return;
-    _isDetecting = true;
-    try {
-      final WriteBuffer allBytes = WriteBuffer();
-      for (final Plane plane in image.planes) {
-        allBytes.putUint8List(plane.bytes);
-      }
-      final bytes = allBytes.done().buffer.asUint8List();
-      final Size imageSize = Size(image.width.toDouble(), image.height.toDouble());
-      final InputImageRotation imageRotation = InputImageRotation.rotation0deg;
-      final InputImageFormat inputImageFormat = InputImageFormat.nv21;
-      final inputImage = InputImage.fromBytes(
-        bytes: bytes,
-        metadata: InputImageMetadata(
-          size: imageSize,
-          rotation: imageRotation,
-          format: inputImageFormat,
-          bytesPerRow: image.planes.first.bytesPerRow,
-        ),
-      );
-      final objects = await _objectDetector.processImage(inputImage);
-      if (objects.isNotEmpty) {
-        setState(() {
-          _detectedLabel = objects.first.labels.isNotEmpty ? objects.first.labels.first.text : 'Object';
-        });
-      } else {
-        setState(() {
-          _detectedLabel = null;
-        });
-      }
-    } catch (e) {
-      // Handle error
-    } finally {
-      _isDetecting = false;
+  Future<void> _requestCameraPermission() async {
+    var status = await Permission.camera.status;
+    if (!status.isGranted) {
+      await Permission.camera.request();
     }
   }
 
   @override
-  void dispose() {
-    _controller?.dispose();
-    _objectDetector.close();
-    super.dispose();
+  void initState() {
+    super.initState();
+    initializeMLKit();
+    _requestCameraPermission().then((_) {
+      if (widget.cameras.isNotEmpty) {
+        _initializeCameraController();
+      } else {
+        setState(() {
+          isCameraReady = false;
+          result = 'No cameras found';
+        });
+      }
+    });
   }
+
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
-      body: SafeArea(
+      appBar: AppBar(
+        title: const Text('Object Detection Camera'),
+        backgroundColor: Colors.deepPurple[100],
+        
+        centerTitle: true,
+      ),
+      body: SingleChildScrollView(
         child: Stack(
           children: [
-            if (_controller != null && _controller!.value.isInitialized)
-              Center(
-                child: AspectRatio(
-                  aspectRatio: _controller!.value.aspectRatio,
-                  child: CameraPreview(_controller!),
-                ),
-              )
-            else
-              const Center(child: CircularProgressIndicator()),
-            Positioned(
-              top: 32,
-              left: 0,
-              right: 0,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const SizedBox(width: 60),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      // ignore: deprecated_member_use
-                      color: Colors.black.withOpacity(0.5),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      children: const [
-                        Icon(Icons.group, color: Colors.white),
-                        SizedBox(width: 8),
-                        Text('3 Friends', style: TextStyle(color: Colors.white)),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.chat_bubble_outline, color: Colors.white),
-                    onPressed: () {},
-                  ),
-                ],
-              ),
-            ),
-            if (_detectedLabel != null)
-              Positioned(
-                bottom: 180,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      // ignore: deprecated_member_use
-                      color: Colors.black.withOpacity(0.7),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      'Detected: $_detectedLabel',
-                      style: const TextStyle(color: Colors.white, fontSize: 18),
-                    ),
-                  ),
-                ),
-              ),
-            Positioned(
-              bottom: 60,
-              left: 0,
-              right: 0,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.flash_on, color: Colors.white),
-                    onPressed: () {},
-                  ),
-                  Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 32),
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.yellow, width: 4),
-                    ),
-                    child: Container(
-                      width: 64,
-                      height: 64,
-                      decoration: const BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
+            // Camera preview widget will be added here
+            Center(
+              child: SizedBox(
+                width: MediaQuery.of(context).size.width,
+                child: isCameraReady
+                    ? CameraPreview(_cameraController)
+                    : Center(
+                        child: Text(
+                          result,
+                          style: TextStyle(fontSize: 18, color: Colors.red),
+                        ),
                       ),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.cameraswitch, color: Colors.white),
-                    onPressed: () {},
-                  ),
-                ],
+               
               ),
             ),
             Positioned(
-              bottom: 20,
-              left: 0,
-              right: 0,
-              child: Center(
+              bottom: 0,
+              child: Container(
+                width: MediaQuery.of(context).size.width,
+                decoration: BoxDecoration(
+                  // ignore: deprecated_member_use
+                  color: Colors.white.withOpacity(0.8),
+                  borderRadius: BorderRadius.only(topRight: Radius.circular(20), topLeft: Radius.circular(20)),
+                ),
                 child: Column(
-                  children: const [
-                    Text('History', style: TextStyle(color: Colors.white)),
-                    Icon(Icons.keyboard_arrow_down, color: Colors.white),
+                  children: [
+                    Text("Detected Objects", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                    SizedBox(height: 12),
+                    Container(
+                      padding: EdgeInsets.all(12),
+                     decoration: BoxDecoration(
+                        color: Colors.deepPurple[50],
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: [
+                          BoxShadow(
+                            // ignore: deprecated_member_use
+                            color: Colors.grey.withOpacity(0.5),
+                            spreadRadius: 2,
+                            blurRadius: 5,
+                            offset: Offset(0, 3), // changes position of shadow
+                          ),
+                        ],
+                      ),
+                      child: Text(
+                        result,
+                        style: TextStyle(fontSize: 16, color: Colors.black54, fontWeight: FontWeight.w500),
+                        textAlign: TextAlign.center,
+                    )
+                    ),
                   ],
                 ),
               ),
             ),
+            // Add other widgets like buttons or overlays here
           ],
         ),
-      ),
+      )
     );
   }
 }
+
