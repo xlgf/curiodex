@@ -33,3 +33,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
+// Text to Speech needs to be implemented
+// Use OpenAI API to get the description of the image
+// make it creative
+//
