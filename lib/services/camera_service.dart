@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:curiodex/utils/custom_font_style.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -192,107 +193,93 @@ class _CameraServiceState extends State<CameraService> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Camera Preview
-        Container(
-          width: MediaQuery.of(context).size.width * 0.95,
-          height: MediaQuery.of(context).size.height * 0.6,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            color: Colors.grey[800],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: isCameraReady
-                ? Stack(
-                    children: [
-                      CameraPreview(_cameraController),
-                      // Detection overlay
-                      if (_lastDetection != null)
-                        Positioned(
-                          top: 16,
-                          left: 16,
-                          right: 16,
-                          child: Container(
-                            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.black54,
-                              borderRadius: BorderRadius.circular(8),
+        // Camera Preview fills available space
+        Expanded(
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: isCameraReady
+                    ? CameraPreview(_cameraController)
+                    : Container(
+                        color: Colors.grey[900],
+                        child: Center(
+                          child: Text(
+                            result,
+                            style: customFontStyle(
+                              fontSize: 16,
+                              color: Colors.white70,
+                              fontWeight: FontWeight.w500,
                             ),
-                            child: Text(
-                              '${_lastDetection!.label} (${(_lastDetection!.confidence * 100).toStringAsFixed(1)}%)',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
+                            textAlign: TextAlign.center,
                           ),
                         ),
-                    ],
-                  )
-                : Container(
-                    color: Colors.grey[900],
-                    child: Center(
-                      child: Text(
-                        result,
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.white70,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        textAlign: TextAlign.center,
                       ),
+              ),
+              // Detection overlay at the top
+              if (_lastDetection != null)
+                Positioned(
+                  top: 24,
+                  left: 16,
+                  right: 16,
+                  child: Container(
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '${_lastDetection!.label} (${(_lastDetection!.confidence * 100).toStringAsFixed(1)}%)',
+                      style: customFontStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      textAlign: TextAlign.center,
                     ),
                   ),
+                ),
+            ],
           ),
         ),
         // Bottom Controls
-        Expanded(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.end,
+        Padding(
+          padding: const EdgeInsets.only(bottom: 5, top: 16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  GestureDetector(
-                    onTap: _captureAndAnalyze,
+              GestureDetector(
+                onTap: _captureAndAnalyze,
+                child: Container(
+                  width: 90,
+                  height: 90,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Color(0xFFDAA523), // gold border
+                      width: 5,
+                    ),
+                  ),
+                  child: Center(
                     child: Container(
-                      width: 90,
-                      height: 90,
+                      width: 80,
+                      height: 80,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
+                        color: Colors.white,
                         border: Border.all(
-                          color: Color(0xFFDAA523), // gold border
-                          width: 5,
+                          color: Colors.black,
+                          width: 3,
                         ),
                       ),
-                      child: Center(
-                        child: Container(
-                          width: 80,
-                          height: 80,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.white,
-                            border: Border.all(
-                              color: Colors.black,
-                              width: 3,
-                            ),
-                          ),
-                          child: Icon(
-                            Icons.search,
-                            size: 48,
-                            color: Color(0xFF232323), // dark icon
-                          ),
-                        ),
+                      child: Icon(
+                        Icons.search,
+                        size: 48,
+                        color: Color(0xFF232323),
                       ),
                     ),
                   ),
-                ],
+                ),
               ),
-              SizedBox(height: 24),
-              Icon(Icons.keyboard_arrow_down, color: Colors.white, size: 32),
-              SizedBox(height: 16),
             ],
           ),
         ),
