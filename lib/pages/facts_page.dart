@@ -21,11 +21,18 @@ class _FactsPageState extends State<FactsPage> {
   List<String> facts = [];
   bool isLoading = true;
   String? error;
+  bool _isSpeaking = false;
 
   @override
   void initState() {
     super.initState();
     _loadFacts();
+  }
+
+  @override
+  void dispose() {
+    _factsService.dispose();
+    super.dispose();
   }
 
   Future<void> _loadFacts() async {
@@ -47,6 +54,51 @@ class _FactsPageState extends State<FactsPage> {
         isLoading = false;
       });
     }
+  }
+
+  Future<void> _speakObjectName() async {
+    setState(() {
+      _isSpeaking = true;
+    });
+    
+    await _factsService.speakObjectName(widget.detectedObject);
+    
+    setState(() {
+      _isSpeaking = false;
+    });
+  }
+
+  Future<void> _speakAllFacts() async {
+    if (facts.isEmpty) return;
+    
+    setState(() {
+      _isSpeaking = true;
+    });
+    
+    await _factsService.speakAllFacts(facts, widget.detectedObject);
+    
+    setState(() {
+      _isSpeaking = false;
+    });
+  }
+
+  Future<void> _speakSingleFact(String fact) async {
+    setState(() {
+      _isSpeaking = true;
+    });
+    
+    await _factsService.speakSingleFact(fact);
+    
+    setState(() {
+      _isSpeaking = false;
+    });
+  }
+
+  Future<void> _stopSpeaking() async {
+    await _factsService.stopSpeaking();
+    setState(() {
+      _isSpeaking = false;
+    });
   }
 
   @override
@@ -101,6 +153,27 @@ class _FactsPageState extends State<FactsPage> {
                         ),
                       ),
                     ),
+                    // Stop speaking button (if speaking)
+                    if (_isSpeaking)
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: GestureDetector(
+                          onTap: _stopSpeaking,
+                          child: Container(
+                            padding: EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              // ignore: deprecated_member_use
+                              color: Colors.red.withOpacity(0.8),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              Icons.stop,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -148,16 +221,19 @@ class _FactsPageState extends State<FactsPage> {
                     SizedBox(height: 12),
                     
                     // Sound Icon
-                    Container(
-                      padding: EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[100],
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(
-                        Icons.volume_up,
-                        color: Colors.grey[600],
-                        size: 20,
+                    GestureDetector(
+                      onTap: _isSpeaking ? _stopSpeaking : _speakObjectName,
+                      child: Container(
+                        padding: EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: _isSpeaking ? Colors.red[100] : Colors.grey[100],
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          _isSpeaking ? Icons.volume_off : Icons.volume_up,
+                          color: _isSpeaking ? Colors.red[600] : Colors.grey[600],
+                          size: 20,
+                        ),
                       ),
                     ),
                   ],
@@ -177,13 +253,54 @@ class _FactsPageState extends State<FactsPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'FUN FACTS',
-                      style: customFontStyle(
-                        color: Colors.black,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
+                    // Fun Facts Header with Speak All Button
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'FUN FACTS',
+                          style: customFontStyle(
+                            color: Colors.black,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        if (facts.isNotEmpty && !isLoading)
+                          GestureDetector(
+                            onTap: _isSpeaking ? _stopSpeaking : _speakAllFacts,
+                            child: Container(
+                              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                // ignore: deprecated_member_use
+                                color: _isSpeaking ? Colors.red[50] : Color(0xFFDAA523).withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: _isSpeaking ? Colors.red : Color(0xFFDAA523),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    _isSpeaking ? Icons.stop : Icons.play_arrow,
+                                    size: 16,
+                                    color: _isSpeaking ? Colors.red : Color(0xFFDAA523),
+                                  ),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    _isSpeaking ? 'Stop' : 'Play All',
+                                    style: customFontStyle(
+                                      color: _isSpeaking ? Colors.red : Color(0xFFDAA523),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     SizedBox(height: 16),
                     
@@ -259,12 +376,29 @@ class _FactsPageState extends State<FactsPage> {
                                 ),
                               ),
                               Expanded(
-                                child: Text(
-                                  fact,
-                                  style: customFontStyle(
-                                    color: Colors.grey[700]!,
-                                    fontSize: 12,
-                                    
+                                child: GestureDetector(
+                                  onTap: () => _speakSingleFact(fact),
+                                  child: Container(
+                                    padding: EdgeInsets.symmetric(vertical: 4),
+                                    child: Text(
+                                      fact,
+                                      style: customFontStyle(
+                                        color: Colors.grey[700]!,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              // Individual fact play button
+                              GestureDetector(
+                                onTap: () => _speakSingleFact(fact),
+                                child: Container(
+                                  padding: EdgeInsets.all(4),
+                                  child: Icon(
+                                    Icons.play_circle_outline,
+                                    size: 16,
+                                    color: Color(0xFFDAA523),
                                   ),
                                 ),
                               ),
@@ -278,7 +412,7 @@ class _FactsPageState extends State<FactsPage> {
               
               // Bottom Navigation
               Padding(
-                padding: EdgeInsets.only(bottom: 20),
+                padding: EdgeInsets.all(20),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [

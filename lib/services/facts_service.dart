@@ -1,6 +1,34 @@
 import 'dart:math';
+import 'package:flutter_tts/flutter_tts.dart';
 
 class FactsService {
+  // TTS instance
+  final FlutterTts _flutterTts = FlutterTts();
+  bool _isSpeaking = false;
+  
+  // Constructor to initialize TTS
+  FactsService() {
+    _initializeTts();
+  }
+
+  // Initialize TTS settings
+  Future<void> _initializeTts() async {
+    await _flutterTts.setLanguage("en-US");
+    await _flutterTts.setSpeechRate(0.5);
+    await _flutterTts.setVolume(1.0);
+    await _flutterTts.setPitch(1.0);
+    
+    // Set up completion handler
+    _flutterTts.setCompletionHandler(() {
+      _isSpeaking = false;
+    });
+    
+    // Set up error handler
+    _flutterTts.setErrorHandler((msg) {
+      _isSpeaking = false;
+    });
+  }
+
   // Sample facts database - in a real app, this would come from an API or local database
   static final Map<String, List<String>> _factsDatabase = {
     'person': [
@@ -108,6 +136,75 @@ class FactsService {
     return List<String>.from(_genericFacts);
   }
 
+  // TTS Methods
+  Future<void> speakObjectName(String objectName) async {
+    if (_isSpeaking) {
+      await stopSpeaking();
+    }
+    
+    _isSpeaking = true;
+    String textToSpeak = "This is a $objectName";
+    await _flutterTts.speak(textToSpeak);
+  }
+
+  Future<void> speakAllFacts(List<String> facts, String objectName) async {
+    if (_isSpeaking) {
+      await stopSpeaking();
+    }
+    
+    if (facts.isEmpty) return;
+    
+    _isSpeaking = true;
+    String introduction = "Here are some interesting facts about $objectName. ";
+    String allFacts = facts.join(". ");
+    String textToSpeak = introduction + allFacts;
+    
+    await _flutterTts.speak(textToSpeak);
+  }
+
+  Future<void> speakSingleFact(String fact) async {
+    if (_isSpeaking) {
+      await stopSpeaking();
+    }
+    
+    _isSpeaking = true;
+    await _flutterTts.speak(fact);
+  }
+
+  Future<void> stopSpeaking() async {
+    await _flutterTts.stop();
+    _isSpeaking = false;
+  }
+
+  bool get isSpeaking => _isSpeaking;
+
+  // TTS Settings
+  Future<void> setSpeechRate(double rate) async {
+    await _flutterTts.setSpeechRate(rate);
+  }
+
+  Future<void> setVolume(double volume) async {
+    await _flutterTts.setVolume(volume);
+  }
+
+  Future<void> setPitch(double pitch) async {
+    await _flutterTts.setPitch(pitch);
+  }
+
+  Future<void> setLanguage(String language) async {
+    await _flutterTts.setLanguage(language);
+  }
+
+  // Get available languages
+  Future<List<String>> getLanguages() async {
+    return await _flutterTts.getLanguages;
+  }
+
+  // Get available voices
+  Future<List<Map<String, String>>> getVoices() async {
+    return await _flutterTts.getVoices;
+  }
+
   // Method to add new facts (for future expansion)
   void addFacts(String objectName, List<String> facts) {
     String normalizedName = objectName.toLowerCase().trim();
@@ -141,5 +238,10 @@ class FactsService {
     }
     
     return results;
+  }
+
+  // Dispose method to clean up resources
+  void dispose() {
+    _flutterTts.stop();
   }
 }
