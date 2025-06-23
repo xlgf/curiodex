@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:camera/camera.dart';
 import 'package:curiodex/pages/camera_page.dart';
+import 'package:curiodex/utils/custom_font_style.dart';
 import 'package:flutter/material.dart';
 
 class Splashscreen extends StatefulWidget {
@@ -39,10 +40,10 @@ class _SplashscreenState extends State<Splashscreen> {
             Image.asset("assets/icons/pokedex.png", width: 200, height: 200),
             SizedBox(height: 20),
             Text("Curiodex",
-                style: TextStyle(
+                style: customFontStyle(
                     fontSize: 40,
                     fontWeight: FontWeight.bold,
-                    color: Colors.deepPurple[100])),
+                    )),
           ],
         ),
       ),

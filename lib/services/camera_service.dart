@@ -3,8 +3,11 @@ import 'package:curiodex/utils/custom_font_style.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:path_provider/path_provider.dart'; // Add this import
+import 'package:path/path.dart' as path; // Add this import
 import '../services/ml_kit_service.dart';
 import '../pages/facts_page.dart';
+import 'dart:math' as math;
 
 class CameraService extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -15,12 +18,15 @@ class CameraService extends StatefulWidget {
 }
 
 class _CameraServiceState extends State<CameraService> {
-  late CameraController _cameraController;
+  CameraController? _cameraController;
   bool isCameraReady = false;
   String result = 'Detecting...';
   final MLKitService _mlKitService = MLKitService();
   bool isDetecting = false;
   DetectedObject? _lastDetection;
+  bool _flashOn = false;
+  bool _isCapturing = false;
+  bool _isSwitching = false;
 
   @override
   void initState() {
@@ -63,7 +69,7 @@ class _CameraServiceState extends State<CameraService> {
     );
     
     try {
-      await _cameraController.initialize();
+      await _cameraController!.initialize();
       if (!mounted) return;
       setState(() {
         isCameraReady = true;
@@ -77,18 +83,40 @@ class _CameraServiceState extends State<CameraService> {
   }
 
   void _startImageStream() {
-    _cameraController.startImageStream((CameraImage image) async {
-      if (isDetecting) return;
-      isDetecting = true;
-      await _processImage(image);
-      isDetecting = false;
-    });
+    if (_cameraController == null || !_cameraController!.value.isInitialized) return;
+    
+    try {
+      _cameraController!.startImageStream((CameraImage image) async {
+        if (!isCameraReady || isDetecting || _isSwitching) return;
+        isDetecting = true;
+        try {
+          await _processImage(image);
+        } catch (e) {
+          if (mounted) {
+            setState(() {
+              result = 'Error processing image: $e';
+              _lastDetection = null;
+            });
+          }
+        } finally {
+          isDetecting = false;
+        }
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          result = 'Error starting image stream: $e';
+          _lastDetection = null;
+        });
+      }
+    }
   }
 
   Future<void> _processImage(CameraImage image) async {
     try {
-      final List<DetectedObject> detections = await _mlKitService.processImage(image, _cameraController);
-      
+      if (!isCameraReady || _cameraController == null) return;
+      final List<DetectedObject> detections = await _mlKitService.processImage(image, _cameraController!);
+
       if (detections.isNotEmpty) {
         final bestDetection = _mlKitService.getBestDetection(detections);
         if (bestDetection != null) {
@@ -113,34 +141,50 @@ class _CameraServiceState extends State<CameraService> {
     }
   }
 
+  // MODIFIED METHOD - This is where you add the image path functionality
   Future<void> _captureAndAnalyze() async {
-    if (!isCameraReady) return;
+    if (!isCameraReady || _isCapturing || _cameraController == null || _isSwitching) return;
+    
+    setState(() {
+      _isCapturing = true;
+    });
     
     try {
-      // Stop the image stream temporarily
-      await _cameraController.stopImageStream();
-      
+      try {
+        await _cameraController!.stopImageStream();
+      } catch (e) {
+        // Ignore if already stopped
+      }
+
+      // Add a small delay to ensure image stream is fully stopped
+      await Future.delayed(Duration(milliseconds: 100));
+
       // Take a high-quality picture
-      final XFile photo = await _cameraController.takePicture();
-      
+      final XFile photo = await _cameraController!.takePicture();
+
       // Process the captured image
       final List<DetectedObject> detections = await _mlKitService.processImageFromPath(photo.path);
-      
+
       if (detections.isNotEmpty) {
         final bestDetection = _mlKitService.getBestDetection(detections);
         if (bestDetection != null && mounted) {
-          // Navigate to facts page
+          // Save the image to permanent storage
+          String? permanentImagePath = await _saveImagePermanently(photo.path);
+          
+          // Navigate to facts page WITH the image path
           Navigator.push(
+            // ignore: use_build_context_synchronously
             context,
             MaterialPageRoute(
               builder: (context) => FactsPage(
                 detectedObject: bestDetection.label,
                 confidence: bestDetection.confidence * 100,
+                imagePath: permanentImagePath, // ADD THIS LINE
               ),
             ),
           ).then((_) {
             // Restart image stream when returning from facts page
-            if (isCameraReady) {
+            if (isCameraReady && _cameraController != null) {
               _startImageStream();
             }
           });
@@ -158,14 +202,13 @@ class _CameraServiceState extends State<CameraService> {
           // Restart image stream
           _startImageStream();
         }
+        
+        // Clean up the temporary photo if no objects detected
+        final File photoFile = File(photo.path);
+        if (await photoFile.exists()) {
+          await photoFile.delete();
+        }
       }
-      
-      // Clean up the temporary photo
-      final File photoFile = File(photo.path);
-      if (await photoFile.exists()) {
-        await photoFile.delete();
-      }
-      
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -175,16 +218,122 @@ class _CameraServiceState extends State<CameraService> {
           ),
         );
         // Restart image stream on error
-        if (isCameraReady) {
+        if (isCameraReady && _cameraController != null) {
           _startImageStream();
         }
+      }
+    } finally {
+      setState(() {
+        _isCapturing = false;
+      });
+    }
+  }
+
+  // ADD THIS NEW METHOD - Saves the captured image permanently
+  Future<String?> _saveImagePermanently(String tempPath) async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final imagesDir = Directory('${directory.path}/curiodex_images');
+      
+      if (!await imagesDir.exists()) {
+        await imagesDir.create(recursive: true);
+      }
+      
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final fileName = 'captured_$timestamp.jpg';
+      final permanentPath = path.join(imagesDir.path, fileName);
+      
+      // Copy the temporary file to permanent location
+      final tempFile = File(tempPath);
+      await tempFile.copy(permanentPath);
+      
+      // Delete the temporary file
+      await tempFile.delete();
+      
+      return permanentPath;
+    } catch (e) {
+      // ignore: avoid_print
+      print('Error saving image permanently: $e');
+      return null;
+    }
+  }
+
+  void _toggleFlash() {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) return;
+    
+    setState(() {
+      _flashOn = !_flashOn;
+    });
+    _cameraController!.setFlashMode(
+      _flashOn ? FlashMode.torch : FlashMode.off,
+    );
+  }
+
+  Future<void> _switchCamera() async {
+    if (widget.cameras.length < 2 || _isSwitching) return;
+
+    setState(() {
+      _isSwitching = true;
+      isCameraReady = false;
+    });
+
+    try {
+      // Stop image stream first
+      if (_cameraController != null) {
+        try {
+          await _cameraController!.stopImageStream();
+        } catch (e) {
+          // Ignore if already stopped
+        }
+      }
+
+      int currentCameraIndex = widget.cameras.indexOf(_cameraController!.description);
+      int newCameraIndex = (currentCameraIndex + 1) % widget.cameras.length;
+
+      // Dispose the old controller
+      await _cameraController?.dispose();
+      _cameraController = null;
+
+      // Small delay to ensure disposal is complete
+      await Future.delayed(Duration(milliseconds: 100));
+
+      // Create and initialize the new controller
+      _cameraController = CameraController(
+        widget.cameras[newCameraIndex],
+        ResolutionPreset.high,
+        enableAudio: false,
+      );
+
+      await _cameraController!.initialize();
+      
+      if (!mounted) return;
+      
+      setState(() {
+        isCameraReady = true;
+        _flashOn = false; // reset flash state
+        _isSwitching = false;
+      });
+      
+      // Start image stream after successful initialization
+      _startImageStream();
+      
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          result = 'Camera switch failed: $e';
+          isCameraReady = false;
+          _isSwitching = false;
+        });
       }
     }
   }
 
+  bool get _isFrontCamera =>
+    _cameraController?.description.lensDirection == CameraLensDirection.front;
+
   @override
   void dispose() {
-    _cameraController.dispose();
+    _cameraController?.dispose();
     _mlKitService.dispose();
     super.dispose();
   }
@@ -198,25 +347,56 @@ class _CameraServiceState extends State<CameraService> {
           child: Stack(
             children: [
               Positioned.fill(
-                child: isCameraReady
-                    ? CameraPreview(_cameraController)
+                child: (isCameraReady && _cameraController?.value.isInitialized == true)
+                    ? (_isFrontCamera
+                        ? Transform(
+                            alignment: Alignment.center,
+                            transform: Matrix4.identity()..rotateY(math.pi),
+                            child: CameraPreview(_cameraController!),
+                          )
+                        : CameraPreview(_cameraController!))
                     : Container(
                         color: Colors.grey[900],
                         child: Center(
-                          child: Text(
-                            result,
-                            style: customFontStyle(
-                              fontSize: 16,
-                              color: Colors.white70,
-                              fontWeight: FontWeight.w500,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
+                          child: _isSwitching
+                              ? Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    CircularProgressIndicator(color: Colors.white70),
+                                    SizedBox(height: 16),
+                                    Text(
+                                      'Switching camera...',
+                                      style: customFontStyle(
+                                        fontSize: 16,
+                                        color: Colors.white70,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ],
+                                )
+                              : Text(
+                                  result,
+                                  style: customFontStyle(
+                                    fontSize: 16,
+                                    color: Colors.white70,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
                         ),
                       ),
               ),
+              if (!_isSwitching)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: CustomPaint(
+                      painter: ScanBoxPainter(),
+                    ),
+                  ),
+                ),
               // Detection overlay at the top
-              if (_lastDetection != null)
+              if (_lastDetection != null && !_isSwitching)
                 Positioned(
                   top: 24,
                   left: 16,
@@ -245,17 +425,27 @@ class _CameraServiceState extends State<CameraService> {
         Padding(
           padding: const EdgeInsets.only(bottom: 5, top: 16),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
+              // Flash button
+              IconButton(
+                icon: Icon(
+                  _flashOn ? Icons.flash_on : Icons.flash_off,
+                  color: (_isSwitching || _isCapturing) ? Colors.grey : Colors.white,
+                  size: 32,
+                ),
+                onPressed: (_isSwitching || _isCapturing) ? null : _toggleFlash,
+              ),
+              // Capture button
               GestureDetector(
-                onTap: _captureAndAnalyze,
+                onTap: (_isSwitching || _isCapturing) ? null : _captureAndAnalyze,
                 child: Container(
                   width: 90,
                   height: 90,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: Color(0xFFDAA523), // gold border
+                      color: (_isSwitching || _isCapturing) ? Colors.grey : Color(0xFFDAA523),
                       width: 5,
                     ),
                   ),
@@ -265,20 +455,38 @@ class _CameraServiceState extends State<CameraService> {
                       height: 80,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: Colors.white,
+                        color: (_isSwitching || _isCapturing) ? Colors.grey[300] : Colors.white,
                         border: Border.all(
                           color: Colors.black,
                           width: 3,
                         ),
                       ),
-                      child: Icon(
-                        Icons.search,
-                        size: 48,
-                        color: Color(0xFF232323),
-                      ),
+                      child: _isCapturing
+                          ? SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 3,
+                                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF232323)),
+                              ),
+                            )
+                          : Icon(
+                              Icons.search,
+                              size: 48,
+                              color: (_isSwitching || _isCapturing) ? Colors.grey : Color(0xFF232323),
+                            ),
                     ),
                   ),
                 ),
+              ),
+              // Switch camera button
+              IconButton(
+                icon: Icon(
+                  Icons.cameraswitch,
+                  color: (_isSwitching || _isCapturing) ? Colors.grey : Colors.white,
+                  size: 32,
+                ),
+                onPressed: (_isSwitching || _isCapturing) ? null : _switchCamera,
               ),
             ],
           ),
@@ -286,4 +494,42 @@ class _CameraServiceState extends State<CameraService> {
       ],
     );
   }
+}
+
+class ScanBoxPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      // ignore: deprecated_member_use
+      ..color = Colors.white.withOpacity(0.7)
+      ..strokeWidth = 3
+      ..style = PaintingStyle.stroke;
+
+    final double boxSize = size.width * 0.6;
+    final double left = (size.width - boxSize) / 2;
+    final double top = (size.height - boxSize) / 2;
+    final rect = Rect.fromLTWH(left, top, boxSize, boxSize);
+
+    // Draw only corners
+    final cornerLength = 32.0;
+
+    // Top left
+    canvas.drawLine(rect.topLeft, rect.topLeft + Offset(cornerLength, 0), paint);
+    canvas.drawLine(rect.topLeft, rect.topLeft + Offset(0, cornerLength), paint);
+
+    // Top right
+    canvas.drawLine(rect.topRight, rect.topRight - Offset(cornerLength, 0), paint);
+    canvas.drawLine(rect.topRight, rect.topRight + Offset(0, cornerLength), paint);
+
+    // Bottom left
+    canvas.drawLine(rect.bottomLeft, rect.bottomLeft + Offset(cornerLength, 0), paint);
+    canvas.drawLine(rect.bottomLeft, rect.bottomLeft - Offset(0, cornerLength), paint);
+
+    // Bottom right
+    canvas.drawLine(rect.bottomRight, rect.bottomRight - Offset(cornerLength, 0), paint);
+    canvas.drawLine(rect.bottomRight, rect.bottomRight - Offset(0, cornerLength), paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
