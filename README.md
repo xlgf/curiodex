@@ -1,16 +1,15 @@
-# curiodex
+# Curiodex: Object Detection App for Children
+Curiodex is an AI-powered mobile app designed for children from ages 3-10 to enhance their learning through interactive object recognition. Through scanning real-world objects, kids receive fun facts with voice narration, and could download cards for offline learning. Given that the majority of kids nowadays are able to utilize devices from an early age, this application fosters curiosity and progressive learning in kids while making it accessible with minimal assistance. 
 
-A new Flutter project.
+## Key Features:
+#### Scan Objects: Scan objects in real time using camera. <br>
+#### Fun Facts Mode: After scanning, it shows 1 - 2 fun facts with image and voice <br> 
+#### Download cards: After fun facts, there's an option where you can download the scanned objects and saved as a card. <br>
+#### Voice Interaction: All interactions have voice narration. It will use simple language for easier understanding <br>
 
-## Getting Started
 
-This project is a starting point for a Flutter application.
+## Technology used
+#### Development Platform - Flutter with Dart <br>
+#### Workplace Environment/s - VS Code <br>
+#### ML/AI Feature/s - Image Labeling, Object Recognition, Text-to-Speech using Google ML Kit and Flutter Plugins <br>
 
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
