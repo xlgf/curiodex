@@ -39,17 +39,17 @@ class FactsService {
       'Humans share about 60% of their DNA with bananas.',
     ],
     'cat': [
-      'Cats have 32 muscles controlling their outer ear.',
+      'Cats can jump up to 6 times their height.',
       'A group of cats is called a "clowder".',
       'Cats can rotate their ears 180 degrees.',
       'Ancient Egyptians worshipped cats and considered them sacred.',
       'Cats spend 70% of their lives sleeping.',
     ],
     'dog': [
-      'Dogs have about 300 million olfactory receptors in their noses.',
-      'A dog\'s sense of smell is 10,000 to 100,000 times stronger than humans.',
+      'Dogs are the most popular pet on the planet!',
+      'They can learn over 100 words and gestures!',
       'Dogs can learn more than 1,000 words.',
-      'The Basenji is the only breed of dog that can\'t bark.',
+      'Dogs use body language to express their feelings.',
       'Dogs sweat through their paw pads.',
     ],
     'car': [

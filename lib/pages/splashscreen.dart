@@ -32,17 +32,18 @@ class _SplashscreenState extends State<Splashscreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Color(0xFFDAA523), 
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Image.asset("assets/icons/pokedex.png", width: 200, height: 200),
+            Image.asset("assets/icons/curiodex.png", width: 200, height: 200),
             SizedBox(height: 20),
             Text("Curiodex",
-                style: customFontStyle(
+                style: logoFontStyle(
                     fontSize: 40,
-                    fontWeight: FontWeight.bold,
+                    
                     )),
           ],
         ),

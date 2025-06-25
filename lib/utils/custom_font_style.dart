@@ -12,3 +12,15 @@ TextStyle customFontStyle({
     fontFamily: 'primary', // Replace with your custom font family
   );
 }
+
+TextStyle logoFontStyle({
+  double fontSize = 16.0,
+  Color color = Colors.black,
+}) {
+  return TextStyle(
+    fontSize: fontSize,
+    color: color,
+    fontWeight: FontWeight.bold,
+    fontFamily: 'logo', // Replace with your custom font family
+  );
+}

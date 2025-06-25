@@ -1,10 +1,12 @@
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:image_gallery_saver_plus/image_gallery_saver_plus.dart';
 import 'dart:ui' as ui;
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:permission_handler/permission_handler.dart'; // Add this dependency
 import '../services/facts_service.dart';
 import '../utils/custom_font_style.dart';
 
@@ -32,6 +34,7 @@ class _FactsPageState extends State<FactsPage> {
   String? error;
   bool _isSpeaking = false;
   bool _isDownloading = false;
+  bool _isCardDownloaded = false; // Track if card has been downloaded
   List<String> _savedCards = []; // List to store saved card paths
 
   @override
@@ -96,9 +99,19 @@ class _FactsPageState extends State<FactsPage> {
 
     try {
       // Request storage permission
-      final permission = await Permission.storage.request();
+      PermissionStatus permission;
+      if (Platform.isAndroid) {
+        if (await _getAndroidVersion() >= 33) {
+          permission = await Permission.photos.request();
+        } else {
+          permission = await Permission.storage.request();
+        }
+      } else {
+        permission = await Permission.photos.request();
+      }
+      
       if (!permission.isGranted) {
-        throw Exception('Storage permission denied');
+        throw Exception('Gallery permission denied');
       }
 
       // Capture the widget as image
@@ -108,32 +121,45 @@ class _FactsPageState extends State<FactsPage> {
       ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       Uint8List pngBytes = byteData!.buffer.asUint8List();
 
-      // Save to app directory
-      final directory = await getApplicationDocumentsDirectory();
-      final cardsDir = Directory('${directory.path}/curiodex_cards');
-      if (!await cardsDir.exists()) {
-        await cardsDir.create(recursive: true);
-      }
-
+      // Save to gallery
       final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final fileName = '${widget.detectedObject}_$timestamp.png';
-      final file = File('${cardsDir.path}/$fileName');
-      await file.writeAsBytes(pngBytes);
-
-      // Update saved cards list
-      setState(() {
-        _savedCards.add(file.path);
-      });
-
-      // Show success message
-      // ignore: use_build_context_synchronously
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Card saved successfully!'),
-          backgroundColor: Color(0xFFDAA523),
-          behavior: SnackBarBehavior.floating,
-        ),
+      final fileName = 'CurioDex_${widget.detectedObject}_$timestamp';
+      
+      final result = await ImageGallerySaverPlus.saveImage(
+        pngBytes,
+        name: fileName,
+        quality: 100,
       );
+
+      if (result['isSuccess'] == true) {
+        // Also save to app directory for local gallery
+        final directory = await getApplicationDocumentsDirectory();
+        final cardsDir = Directory('${directory.path}/curiodex_cards');
+        if (!await cardsDir.exists()) {
+          await cardsDir.create(recursive: true);
+        }
+
+        final file = File('${cardsDir.path}/$fileName.png');
+        await file.writeAsBytes(pngBytes);
+
+        // Update saved cards list
+        setState(() {
+          _savedCards.add(file.path);
+          _isCardDownloaded = true; // Mark card as downloaded
+        });
+
+        // Show success message
+        // ignore: use_build_context_synchronously
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Card saved to gallery successfully!'),
+            backgroundColor: Color(0xFFDAA523),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } else {
+        throw Exception('Failed to save to gallery');
+      }
     } catch (e) {
       // ignore: use_build_context_synchronously
       ScaffoldMessenger.of(context).showSnackBar(
@@ -148,6 +174,11 @@ class _FactsPageState extends State<FactsPage> {
         _isDownloading = false;
       });
     }
+  }
+
+  Future<int> _getAndroidVersion() async {
+    var androidInfo = await DeviceInfoPlugin().androidInfo;
+    return androidInfo.version.sdkInt;
   }
 
   void _showGallery() {
@@ -315,8 +346,8 @@ class _FactsPageState extends State<FactsPage> {
 
   Widget _buildObjectCircle() {
     return Container(
-      width: 120,
-      height: 120,
+      width: 150,
+      height: 150,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: widget.imagePath != null ? Colors.transparent : Color(0xFFDAA523),
@@ -329,8 +360,8 @@ class _FactsPageState extends State<FactsPage> {
               child: Image.file(
                 File(widget.imagePath!),
                 fit: BoxFit.cover,
-                width: 120,
-                height: 120,
+                width: 150,
+                height: 150,
               ),
             )
           : null,
@@ -451,22 +482,23 @@ class _FactsPageState extends State<FactsPage> {
                       ),
                       SizedBox(height: 12),
                       
-                      // Sound Icon
-                      GestureDetector(
-                        onTap: _isSpeaking ? _stopSpeaking : _speakObjectName,
-                        child: Container(
-                          padding: EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: _isSpeaking ? Colors.red[100] : Colors.grey[100],
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Icon(
-                            _isSpeaking ? Icons.volume_off : Icons.volume_up,
-                            color: _isSpeaking ? Colors.red[600] : Colors.grey[600],
-                            size: 20,
+                      // Sound Icon - Only show if card not downloaded
+                      if (!_isCardDownloaded)
+                        GestureDetector(
+                          onTap: _isSpeaking ? _stopSpeaking : _speakObjectName,
+                          child: Container(
+                            padding: EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: _isSpeaking ? Colors.red[100] : Colors.grey[100],
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              _isSpeaking ? Icons.volume_off : Icons.volume_up,
+                              color: _isSpeaking ? Colors.red[600] : Colors.grey[600],
+                              size: 20,
+                            ),
                           ),
                         ),
-                      ),
                       
                       SizedBox(height: 20),
                       
@@ -474,7 +506,7 @@ class _FactsPageState extends State<FactsPage> {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Fun Facts Header with Speak All Button
+                          // Fun Facts Header with Speak All Button (only if not downloaded)
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
@@ -486,7 +518,8 @@ class _FactsPageState extends State<FactsPage> {
                                   fontSize: 14,
                                 ),
                               ),
-                              if (facts.isNotEmpty && !isLoading)
+                              // Only show Play All button if card not downloaded
+                              if (facts.isNotEmpty && !isLoading && !_isCardDownloaded)
                                 GestureDetector(
                                   onTap: _isSpeaking ? _stopSpeaking : _speakAllFacts,
                                   child: Container(
@@ -514,7 +547,7 @@ class _FactsPageState extends State<FactsPage> {
                                           style: customFontStyle(
                                             color: _isSpeaking ? Colors.red : Color(0xFFDAA523),
                                             fontSize: 12,
-                                            fontWeight: FontWeight.w600,
+                                            fontWeight: FontWeight.bold,
                                           ),
                                         ),
                                       ],
@@ -598,31 +631,32 @@ class _FactsPageState extends State<FactsPage> {
                                     ),
                                     Expanded(
                                       child: GestureDetector(
-                                        onTap: () => _speakSingleFact(fact),
+                                        onTap: _isCardDownloaded ? null : () => _speakSingleFact(fact),
                                         child: Container(
                                           padding: EdgeInsets.symmetric(vertical: 4),
                                           child: Text(
                                             fact,
                                             style: customFontStyle(
-                                              color: Colors.grey[700]!,
-                                              fontSize: 12,
+                                              color: Colors.black87,
+                                              fontSize: 14,
                                             ),
                                           ),
                                         ),
                                       ),
                                     ),
-                                    // Individual fact play button
-                                    GestureDetector(
-                                      onTap: () => _speakSingleFact(fact),
-                                      child: Container(
-                                        padding: EdgeInsets.all(4),
-                                        child: Icon(
-                                          Icons.play_circle_outline,
-                                          size: 16,
-                                          color: Color(0xFFDAA523),
+                                    // Individual fact play button - Only show if card not downloaded
+                                    if (!_isCardDownloaded)
+                                      GestureDetector(
+                                        onTap: () => _speakSingleFact(fact),
+                                        child: Container(
+                                          padding: EdgeInsets.all(4),
+                                          child: Icon(
+                                            Icons.play_circle_outline,
+                                            size: 16,
+                                            color: Color(0xFFDAA523),
+                                          ),
                                         ),
                                       ),
-                                    ),
                                   ],
                                 ),
                               )).toList(),

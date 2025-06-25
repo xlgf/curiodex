@@ -3,8 +3,8 @@ import 'package:curiodex/utils/custom_font_style.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:path_provider/path_provider.dart'; // Add this import
-import 'package:path/path.dart' as path; // Add this import
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
 import '../services/ml_kit_service.dart';
 import '../pages/facts_page.dart';
 import 'dart:math' as math;
@@ -27,6 +27,9 @@ class _CameraServiceState extends State<CameraService> {
   bool _flashOn = false;
   bool _isCapturing = false;
   bool _isSwitching = false;
+  
+  // Add this to track if image stream is running
+  bool _isImageStreamActive = false;
 
   @override
   void initState() {
@@ -83,11 +86,16 @@ class _CameraServiceState extends State<CameraService> {
   }
 
   void _startImageStream() {
-    if (_cameraController == null || !_cameraController!.value.isInitialized) return;
+    if (_cameraController == null || 
+        !_cameraController!.value.isInitialized || 
+        _isImageStreamActive) {
+      return;
+    }
     
     try {
+      _isImageStreamActive = true;
       _cameraController!.startImageStream((CameraImage image) async {
-        if (!isCameraReady || isDetecting || _isSwitching) return;
+        if (!isCameraReady || isDetecting || _isSwitching || _isCapturing) return;
         isDetecting = true;
         try {
           await _processImage(image);
@@ -103,12 +111,29 @@ class _CameraServiceState extends State<CameraService> {
         }
       });
     } catch (e) {
+      _isImageStreamActive = false;
       if (mounted) {
         setState(() {
           result = 'Error starting image stream: $e';
           _lastDetection = null;
         });
       }
+    }
+  }
+
+  // Add this method to properly stop image stream
+  Future<void> _stopImageStream() async {
+    if (!_isImageStreamActive || _cameraController == null) return;
+    
+    try {
+      await _cameraController!.stopImageStream();
+      _isImageStreamActive = false;
+      // Add a delay to ensure the stream is fully stopped
+      await Future.delayed(Duration(milliseconds: 200));
+    } catch (e) {
+      _isImageStreamActive = false;
+      // ignore: avoid_print
+      print('Error stopping image stream: $e');
     }
   }
 
@@ -141,8 +166,9 @@ class _CameraServiceState extends State<CameraService> {
     }
   }
 
-  // MODIFIED METHOD - This is where you add the image path functionality
+  // FIXED METHOD - Proper handling of concurrent captures
   Future<void> _captureAndAnalyze() async {
+    // Prevent multiple simultaneous captures
     if (!isCameraReady || _isCapturing || _cameraController == null || _isSwitching) return;
     
     setState(() {
@@ -150,14 +176,8 @@ class _CameraServiceState extends State<CameraService> {
     });
     
     try {
-      try {
-        await _cameraController!.stopImageStream();
-      } catch (e) {
-        // Ignore if already stopped
-      }
-
-      // Add a small delay to ensure image stream is fully stopped
-      await Future.delayed(Duration(milliseconds: 100));
+      // Properly stop the image stream and wait for it to complete
+      await _stopImageStream();
 
       // Take a high-quality picture
       final XFile photo = await _cameraController!.takePicture();
@@ -179,12 +199,12 @@ class _CameraServiceState extends State<CameraService> {
               builder: (context) => FactsPage(
                 detectedObject: bestDetection.label,
                 confidence: bestDetection.confidence * 100,
-                imagePath: permanentImagePath, // ADD THIS LINE
+                imagePath: permanentImagePath,
               ),
             ),
           ).then((_) {
             // Restart image stream when returning from facts page
-            if (isCameraReady && _cameraController != null) {
+            if (mounted && isCameraReady && _cameraController != null) {
               _startImageStream();
             }
           });
@@ -199,14 +219,17 @@ class _CameraServiceState extends State<CameraService> {
               duration: Duration(seconds: 2),
             ),
           );
-          // Restart image stream
-          _startImageStream();
         }
         
         // Clean up the temporary photo if no objects detected
         final File photoFile = File(photo.path);
         if (await photoFile.exists()) {
           await photoFile.delete();
+        }
+        
+        // Restart image stream after cleanup
+        if (mounted && isCameraReady && _cameraController != null) {
+          _startImageStream();
         }
       }
     } catch (e) {
@@ -217,19 +240,21 @@ class _CameraServiceState extends State<CameraService> {
             backgroundColor: Colors.red,
           ),
         );
-        // Restart image stream on error
-        if (isCameraReady && _cameraController != null) {
-          _startImageStream();
-        }
+      }
+      
+      // Restart image stream on error
+      if (mounted && isCameraReady && _cameraController != null) {
+        _startImageStream();
       }
     } finally {
-      setState(() {
-        _isCapturing = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isCapturing = false;
+        });
+      }
     }
   }
 
-  // ADD THIS NEW METHOD - Saves the captured image permanently
   Future<String?> _saveImagePermanently(String tempPath) async {
     try {
       final directory = await getApplicationDocumentsDirectory();
@@ -279,13 +304,7 @@ class _CameraServiceState extends State<CameraService> {
 
     try {
       // Stop image stream first
-      if (_cameraController != null) {
-        try {
-          await _cameraController!.stopImageStream();
-        } catch (e) {
-          // Ignore if already stopped
-        }
-      }
+      await _stopImageStream();
 
       int currentCameraIndex = widget.cameras.indexOf(_cameraController!.description);
       int newCameraIndex = (currentCameraIndex + 1) % widget.cameras.length;
@@ -295,7 +314,7 @@ class _CameraServiceState extends State<CameraService> {
       _cameraController = null;
 
       // Small delay to ensure disposal is complete
-      await Future.delayed(Duration(milliseconds: 100));
+      await Future.delayed(Duration(milliseconds: 200));
 
       // Create and initialize the new controller
       _cameraController = CameraController(
@@ -333,6 +352,7 @@ class _CameraServiceState extends State<CameraService> {
 
   @override
   void dispose() {
+    _stopImageStream();
     _cameraController?.dispose();
     _mlKitService.dispose();
     super.dispose();
